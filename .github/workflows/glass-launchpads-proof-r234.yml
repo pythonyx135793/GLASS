@@ -1,0 +1,88 @@
+name: GLASS launchpads exact-source validation
+on:
+  push:
+    branches: [codex/glass-launchpads-proof-r234]
+    paths: [.github/workflows/glass-launchpads-proof-r234.yml]
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3bedb03cf447d794a175c93f2fb7715255633a2d
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out original source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          path: baseline
+          persist-credentials: false
+      - name: Pin, original-source and dependency guards
+        shell: bash
+        run: |
+          mkdir -p proof-output
+          test "$(git -C app rev-parse HEAD)" = 3bedb03cf447d794a175c93f2fb7715255633a2d
+          test "$(git -C app rev-parse HEAD^{tree})" = 2021dd94692315a73579ccd1d980710c9d7e90d2
+          test "$(git -C baseline rev-parse HEAD)" = 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          git -C app diff --exit-code 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD -- . ':!README.md' ':!docs/creator-history.md' ':!src/content.js' ':!src/lib/scan/devprofile.js' ':!src/lib/scan/launchpads.js' ':!src/lib/scan/operator.js' ':!src/lib/scan/pipeline.js' ':!test/helpers/launchpad-fixture.mjs' ':!test/launchpad-profile.test.mjs' ':!test/launchpads.test.mjs'
+          node --version | tee proof-output/node-version.txt
+          python3 --version | tee proof-output/python-version.txt
+          cat /etc/os-release > proof-output/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('app/package.json')); if(p.scripts.test!=='node --test test/*.test.mjs'||p.scripts.pretest||p.scripts.posttest||Object.keys(p.dependencies||{}).length||Object.keys(p.devDependencies||{}).length) process.exit(1);"
+      - name: Original behavioral failures and complete fixed suite offline
+        shell: bash
+        run: |
+          cat > proof-output/offline-run.py <<'PY'
+          import errno
+          import os
+          from pathlib import Path
+          import socket
+          import subprocess
+          import sys
+          probe = socket.socket()
+          try:
+              probe.connect(('192.0.2.1', 443))
+          except OSError as error:
+              assert error.errno == errno.ENETUNREACH, str(error)
+              print('PASS: OS network namespace blocks external routes', flush=True)
+          else:
+              raise AssertionError('Expected external route to be unavailable')
+          finally:
+              probe.close()
+          root, baseline, output = map(Path, sys.argv[1:])
+          env = dict(os.environ, GLASS_BASELINE_ROOT=str(baseline))
+          old = subprocess.run(['node', '--test', '--test-reporter=tap', '--test-name-pattern=regression:', str(root/'test/launchpad-profile.test.mjs')], cwd=root, env=env, text=True, capture_output=True)
+          (output/'baseline-control.log').write_text(old.stdout + old.stderr)
+          assert old.returncode == 1, old.stdout + old.stderr
+          assert '# fail 3\n' in old.stdout and '# pass 0\n' in old.stdout, old.stdout
+          assert old.stdout.count('non-pump initialization must be exposed by creatorProfile') == 3, old.stdout
+          print('PASS: original creatorProfile fails all three advertised-family behavioral regressions (no import failure)', flush=True)
+          files = sorted(str(p) for p in (root/'test').glob('*.test.mjs'))
+          subprocess.run(['node', '--test', '--test-reporter=tap', *files], cwd=root, check=True)
+          PY
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/proof-output/offline-run.py" "$GITHUB_WORKSPACE/app" "$GITHUB_WORKSPACE/baseline" "$GITHUB_WORKSPACE/proof-output" | tee proof-output/full-suite.log
+      - name: Syntax, exact tree and source hygiene
+        shell: bash
+        run: |
+          for file in src/content.js src/lib/scan/devprofile.js src/lib/scan/launchpads.js src/lib/scan/operator.js src/lib/scan/pipeline.js test/helpers/launchpad-fixture.mjs test/launchpad-profile.test.mjs test/launchpads.test.mjs; do node --check "app/$file"; done
+          git -C app diff --check 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD
+          test "$(git -C app rev-parse HEAD^{tree})" = 2021dd94692315a73579ccd1d980710c9d7e90d2
+          test -z "$(git -C app status --porcelain)"
+          test -z "$(git -C baseline status --porcelain)"
+          git -C app diff --stat 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD > proof-output/diff-stat.txt
+          git -C app diff --name-only 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
+          printf '%s\n' 'Application 3bedb03cf447d794a175c93f2fb7715255633a2d tree 2021dd94692315a73579ccd1d980710c9d7e90d2. Original three behavioral failures, complete offline suite and source guards passed. New protocol fixtures are synthetic from pinned official schemas; existing scanner fixtures unchanged. No live RPC, mainnet capture, exhaustive history or browser E2E claim.' > proof-output/result.txt
+          cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve exact logs and source hashes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-launchpads-r234-proof
+          path: proof-output/
+          retention-days: 30

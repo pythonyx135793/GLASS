@@ -13,7 +13,7 @@ jobs:
       - name: Check out exact application
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: f2f895701bec4f8f2b53649cebdb6a335e005cb9
+          ref: 6b7c2fde2f7f321e785f885589f1aa28d256ee54
           path: app
           fetch-depth: 0
           persist-credentials: false
@@ -21,8 +21,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p proof-output
-          test "$(git -C app rev-parse HEAD)" = f2f895701bec4f8f2b53649cebdb6a335e005cb9
-          test "$(git -C app rev-parse HEAD^{tree})" = a93990cd6103d7434c98c33a46c72a561861bdaa
+          test "$(git -C app rev-parse HEAD)" = 6b7c2fde2f7f321e785f885589f1aa28d256ee54
+          test "$(git -C app rev-parse HEAD^{tree})" = 5bb32ef31e1feaa0f62568d6f4732518eb1096f0
           git -C app diff --exit-code 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD -- . ':!PRIVACY.md' ':!README.md' ':!manifest.json' ':!src/background.js' ':!src/content.js' ':!src/lib/constants.js' ':!src/lib/shared-index.js' ':!src/popup.html' ':!src/popup.js' ':!test/helpers/worker-fixtures.mjs' ':!test/shared-index.test.mjs' ':!test/worker.test.mjs' ':!worker/README.md' ':!worker/config.example.json' ':!worker/feed.mjs' ':!worker/main.mjs' ':!worker/server.mjs' ':!worker/store.mjs' ':!worker/worker.mjs'
           git -C app worktree add --detach ../baseline 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
           test ! -e baseline/worker/worker.mjs
@@ -108,10 +108,10 @@ jobs:
           PY
           git -C app diff --check 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD
           test -z "$(git -C app status --porcelain)"
-          test "$(git -C app rev-parse HEAD^{tree})" = a93990cd6103d7434c98c33a46c72a561861bdaa
+          test "$(git -C app rev-parse HEAD^{tree})" = 5bb32ef31e1feaa0f62568d6f4732518eb1096f0
           git -C app diff --stat 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD > proof-output/diff-stat.txt
           git -C app diff --name-only 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
-          printf '%s\n' 'Application f2f895701bec4f8f2b53649cebdb6a335e005cb9 tree a93990cd6103d7434c98c33a46c72a561861bdaa. Captured creation/trade fixture with synthetic surrounding transport exercised real seven-stage runScan, durable index, loopback HTTP consumer and restart. Separate CLI used real RpcClient against loopback. Full unchanged offline suite, original failing consumer contract, package and source guards passed. No live RPC/public deployment, browser-runtime or production-throughput claim.' > proof-output/result.txt
+          printf '%s\n' 'Application 6b7c2fde2f7f321e785f885589f1aa28d256ee54 tree 5bb32ef31e1feaa0f62568d6f4732518eb1096f0. Captured creation/trade fixture with synthetic surrounding transport exercised real seven-stage runScan, durable index, loopback HTTP consumer and restart. Separate CLI used real RpcClient against loopback. Full unchanged offline suite, original failing consumer contract, package and source guards passed. No live RPC/public deployment, browser-runtime or production-throughput claim.' > proof-output/result.txt
           cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve immutable proof
         if: always()

@@ -1,0 +1,96 @@
+name: GLASS trajectory exact-source validation
+on:
+  push:
+    branches: [codex/glass-trajectory-proof-r232]
+    paths: [.github/workflows/glass-trajectory-proof-r232.yml]
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 03a3da20834e29734daeb7714c305ebacd3ad107
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out original source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          path: baseline
+          persist-credentials: false
+      - name: Pin, original-source and dependency guards
+        shell: bash
+        run: |
+          mkdir -p proof-output
+          test "$(git -C app rev-parse HEAD)" = 03a3da20834e29734daeb7714c305ebacd3ad107
+          test "$(git -C app rev-parse HEAD^{tree})" = b1eefc5edd42b26dadb066045efb1737d26cb6be
+          test "$(git -C baseline rev-parse HEAD)" = 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          git -C app diff --exit-code 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD -- . ':!README.md' ':!docs/trajectory.md' ':!src/lib/scan/trajectory.js' ':!test/trajectory.test.mjs'
+          node --version | tee proof-output/node-version.txt
+          python3 --version | tee proof-output/python-version.txt
+          cat /etc/os-release > proof-output/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('app/package.json')); if(p.scripts.test!=='node --test test/*.test.mjs'||p.scripts.pretest||p.scripts.posttest||Object.keys(p.dependencies||{}).length||Object.keys(p.devDependencies||{}).length) process.exit(1);"
+      - name: Original missing-feature control (not behavioral regression failures)
+        shell: bash
+        run: |
+          test ! -e baseline/src/lib/scan/trajectory.js
+          node --input-type=module <<'JS' | tee proof-output/baseline-control.log
+          import { pathToFileURL } from 'node:url';
+          import path from 'node:path';
+          try {
+            await import(pathToFileURL(path.resolve('baseline/src/lib/scan/trajectory.js')));
+            throw new Error('Expected original feature to be absent');
+          } catch (error) {
+            if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+            console.log('EXPECTED ORIGINAL FAILURE: trajectory module absent. One import failure; zero comparator behavior assertions executed.');
+          }
+          JS
+      - name: Complete offline suite in isolated network namespace
+        shell: bash
+        run: |
+          cat > proof-output/offline-run.py <<'PY'
+          import errno
+          from pathlib import Path
+          import socket
+          import subprocess
+          import sys
+          probe = socket.socket()
+          try:
+              probe.connect(('192.0.2.1', 443))
+          except OSError as error:
+              assert error.errno == errno.ENETUNREACH, str(error)
+              print('PASS: OS network namespace blocks external routes', flush=True)
+          else:
+              raise AssertionError('Expected external route to be unavailable')
+          finally:
+              probe.close()
+          root = Path(sys.argv[1])
+          files = sorted(str(p) for p in (root/'test').glob('*.test.mjs'))
+          subprocess.run(['node', '--test', *files], cwd=root, check=True)
+          PY
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/proof-output/offline-run.py" "$GITHUB_WORKSPACE/app" | tee proof-output/full-suite.log
+      - name: Syntax, exact tree and source hygiene
+        shell: bash
+        run: |
+          node --check app/src/lib/scan/trajectory.js
+          node --check app/test/trajectory.test.mjs
+          git -C app diff --check 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD
+          test "$(git -C app rev-parse HEAD^{tree})" = b1eefc5edd42b26dadb066045efb1737d26cb6be
+          test -z "$(git -C app status --porcelain)"
+          test -z "$(git -C baseline status --porcelain)"
+          git -C app diff --stat 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD > proof-output/diff-stat.txt
+          sha256sum app/src/lib/scan/trajectory.js app/test/trajectory.test.mjs app/docs/trajectory.md > proof-output/source-sha256.txt
+          printf '%s\n' 'Application03a3da20834e29734daeb7714c305ebacd3ad107 treeb1eefc5edd42b26dadb066045efb1737d26cb6be. Complete offline suite and source guards passed. Synthetic comparator cases; existing real scanner fixtures unchanged. No live-data, corpus verification, UI or prediction claim.' > proof-output/result.txt
+          cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve exact logs and source hashes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-trajectory-r232-proof
+          path: proof-output/
+          retention-days: 30

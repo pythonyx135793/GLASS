@@ -1,0 +1,110 @@
+name: GLASS launchpads CLI correction exact-source validation
+on:
+  push:
+    branches: [codex/glass-launchpads-cli-proof-r234]
+    paths: [.github/workflows/glass-launchpads-cli-proof-r234.yml]
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fa7281492810eb44034f82c1fc6ae62a0acacbb0
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin, original-source and dependency guards
+        shell: bash
+        run: |
+          mkdir -p proof-output
+          test "$(git -C app rev-parse HEAD)" = fa7281492810eb44034f82c1fc6ae62a0acacbb0
+          test "$(git -C app rev-parse HEAD^{tree})" = e1f630d62a50cd00dc91819fe7aa4903d2f1c0a6
+          git -C app diff --exit-code 3bedb03cf447d794a175c93f2fb7715255633a2d HEAD -- . ':!cli/scan.mjs'
+          git -C app diff --exit-code 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD -- . ':!cli/scan.mjs' ':!README.md' ':!docs/creator-history.md' ':!src/content.js' ':!src/lib/scan/devprofile.js' ':!src/lib/scan/launchpads.js' ':!src/lib/scan/operator.js' ':!src/lib/scan/pipeline.js' ':!test/helpers/launchpad-fixture.mjs' ':!test/launchpad-profile.test.mjs' ':!test/launchpads.test.mjs'
+          node --version | tee proof-output/node-version.txt
+          python3 --version | tee proof-output/python-version.txt
+          cat /etc/os-release > proof-output/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('app/package.json')); if(p.scripts.test!=='node --test test/*.test.mjs'||p.scripts.pretest||p.scripts.posttest||Object.keys(p.dependencies||{}).length||Object.keys(p.devDependencies||{}).length) process.exit(1);"
+      - name: CLI output correction and complete fixed suite offline
+        shell: bash
+        run: |
+          cat > proof-output/cli-format-check.mjs <<'JS'
+          // Direct execution of the committed CLI's existing operator pretty-print block.
+          // No scanner, fetch, RPC, wallet or browser is run by this bounded output check.
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import vm from 'node:vm';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const root = path.resolve(process.argv[2]);
+          const source = fs.readFileSync(path.join(root, 'cli/scan.mjs'), 'utf8');
+          const start = source.indexOf('if (report.operator) {');
+          const end = source.indexOf('if (report.errors.length)', start);
+          assert.ok(start > 0 && end > start);
+          const script = new vm.Script(source.slice(start, end), { filename: 'cli/scan.mjs operator output' });
+          const { fmtUsd, fmtMin } = await import(pathToFileURL(path.join(root, 'src/lib/scan/operator.js')));
+          function output(operator) {
+            const lines = [];
+            script.runInNewContext({ report: { operator }, fmtUsd, fmtMin, console: { log: (line) => lines.push(line) } });
+            return lines.join('\n');
+          }
+          const pump = output({ profile: { source: 'pump.fun', totalCreated: 16, archetype: { label: 'Serial launcher' } }, discovered: 15 });
+          assert.equal(pump, '\nDev history: 16 tokens launched by this wallet (pump.fun) · Serial launcher · 15 prior launch(es) linked');
+          console.log('PASS: pump-only CLI wording preserved exactly');
+          const mixed = output({ profile: { source: 'creator-history', totalCreated: 4, atLeast: true, archetype: { label: 'Partial creator history' } }, discovered: 3, launches: [{ relation: 'created', symbol: 'FIX', mint: 'synthetic', peakMcapUsd: null, nowMcapUsd: null, minutesToPeak: null, graduated: null, outcome: 'unknown' }] });
+          assert.match(mixed, /4\+ tokens launched by this wallet \(multiple launchpads; partial coverage\)/);
+          assert.doesNotMatch(mixed, /pump\.fun|GRAD/);
+          assert.match(mixed, /peak — @— now —\s+unknown/);
+          console.log('PASS: mixed CLI names partial coverage and preserves unknown outcomes');
+          assert.match(output({ profile: { totalCreated: 1 }, discovered: 0 }), /\(source unknown\)/);
+          assert.match(output({ coverage: { bonk: { status: 'unavailable' } }, profileError: 'HTTP 403', discovered: 0 }), /creator records unavailable \(HTTP 403\)/);
+          assert.match(output({ profileError: 'HTTP 403', discovered: 0 }), /pump.fun record unavailable \(HTTP 403\)/);
+          console.log('PASS: unknown source and unavailable records stay explicit');
+          JS
+          cat > proof-output/offline-run.py <<'PY'
+          import errno
+          import os
+          from pathlib import Path
+          import socket
+          import subprocess
+          import sys
+          probe = socket.socket()
+          try:
+              probe.connect(('192.0.2.1', 443))
+          except OSError as error:
+              assert error.errno == errno.ENETUNREACH, str(error)
+              print('PASS: OS network namespace blocks external routes', flush=True)
+          else:
+              raise AssertionError('Expected external route to be unavailable')
+          finally:
+              probe.close()
+          root, output = map(Path, sys.argv[1:])
+          checked = subprocess.run(['node', str(output/'cli-format-check.mjs'), str(root)], check=True, text=True, capture_output=True)
+          (output/'cli-output-check.log').write_text(checked.stdout + checked.stderr)
+          print(checked.stdout, end='', flush=True)
+          files = sorted(str(p) for p in (root/'test').glob('*.test.mjs'))
+          subprocess.run(['node', '--test', '--test-reporter=tap', *files], cwd=root, check=True)
+          PY
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/proof-output/offline-run.py" "$GITHUB_WORKSPACE/app" "$GITHUB_WORKSPACE/proof-output" | tee proof-output/full-suite.log
+      - name: Syntax, exact tree and source hygiene
+        shell: bash
+        run: |
+          for file in cli/scan.mjs src/content.js src/lib/scan/devprofile.js src/lib/scan/launchpads.js src/lib/scan/operator.js src/lib/scan/pipeline.js test/helpers/launchpad-fixture.mjs test/launchpad-profile.test.mjs test/launchpads.test.mjs; do node --check "app/$file"; done
+          git -C app diff --check 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD
+          test "$(git -C app rev-parse HEAD^{tree})" = e1f630d62a50cd00dc91819fe7aa4903d2f1c0a6
+          test -z "$(git -C app status --porcelain)"
+          git -C app diff --stat 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD > proof-output/diff-stat.txt
+          git -C app diff --name-only 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
+          printf '%s\n' 'Application fa7281492810eb44034f82c1fc6ae62a0acacbb0 tree e1f630d62a50cd00dc91819fe7aa4903d2f1c0a6. CLI source-aware output check, complete offline suite and source guards passed. Original three failures remain preserved in run40037661002. New protocol fixtures are synthetic from pinned official schemas; existing scanner fixtures unchanged. No live RPC, mainnet capture, exhaustive history or browser E2E claim.' > proof-output/result.txt
+          cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve exact logs and source hashes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-launchpads-cli-r234-proof
+          path: proof-output/
+          retention-days: 30

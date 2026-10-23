@@ -1,0 +1,124 @@
+name: GLASS pre-scan worker exact-source offline validation
+on:
+  push:
+    branches: [codex/glass-worker-proof-r236]
+    paths: [.github/workflows/glass-worker-proof-r236.yml]
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: f2f895701bec4f8f2b53649cebdb6a335e005cb9
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pins, unchanged engine/tests and dependency guards
+        shell: bash
+        run: |
+          mkdir -p proof-output
+          test "$(git -C app rev-parse HEAD)" = f2f895701bec4f8f2b53649cebdb6a335e005cb9
+          test "$(git -C app rev-parse HEAD^{tree})" = a93990cd6103d7434c98c33a46c72a561861bdaa
+          git -C app diff --exit-code 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD -- . ':!PRIVACY.md' ':!README.md' ':!manifest.json' ':!src/background.js' ':!src/content.js' ':!src/lib/constants.js' ':!src/lib/shared-index.js' ':!src/popup.html' ':!src/popup.js' ':!test/helpers/worker-fixtures.mjs' ':!test/shared-index.test.mjs' ':!test/worker.test.mjs' ':!worker/README.md' ':!worker/config.example.json' ':!worker/feed.mjs' ':!worker/main.mjs' ':!worker/server.mjs' ':!worker/store.mjs' ':!worker/worker.mjs'
+          git -C app worktree add --detach ../baseline 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          test ! -e baseline/worker/worker.mjs
+          node --version | tee proof-output/node-version.txt
+          python3 --version | tee proof-output/python-version.txt
+          cat /etc/os-release > proof-output/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs';import assert from 'node:assert/strict';import{DEFAULTS}from './app/src/lib/constants.js';const p=JSON.parse(fs.readFileSync('app/package.json'));assert.equal(p.scripts.test,'node --test test/*.test.mjs');assert.ok(!p.scripts.pretest&&!p.scripts.posttest);assert.equal(Object.keys(p.dependencies||{}).length,0);assert.equal(Object.keys(p.devDependencies||{}).length,0);assert.equal(DEFAULTS.sharedIndexEnabled,false);assert.equal(DEFAULTS.sharedIndexUrl,'');"
+      - name: Original failing consumer contract and full fixed suite with external network blocked
+        shell: bash
+        run: |
+          cat > proof-output/baseline-check.mjs <<'JS'
+          import fs from 'node:fs';
+          import vm from 'node:vm';
+          import assert from 'node:assert/strict';
+          const source=fs.readFileSync(process.argv[2],'utf8');
+          const code=source.slice(source.indexOf('async function startScan('),source.indexOf('const watchers ='));
+          assert.ok(code.length>500);
+          let local=0,index=0;
+          const context={inflight:new Map(),getSettings:async()=>({sharedIndexEnabled:true,sharedIndexUrl:'https://fixture.invalid'}),
+            reportCache:{get:async()=>null},makeRpc:()=>({}),broadcast:()=>{},setInterval:()=>1,clearInterval:()=>{},
+            lookupSharedSnapshot:async()=>{index++;return{snapshot:{mint:'fixture'}};},snapshotReport:(v)=>v,
+            runScan:async()=>{local++;return null;},memory:{},DEFAULTS:{},console};
+          vm.createContext(context);vm.runInContext(code+'\nglobalThis.start=startScan;',context);
+          await context.start('fixture','fixture',true,{postMessage:()=>{}},false);
+          console.log(`Original background: local scans=${local}, index lookups=${index}`);
+          assert.equal(local,0,'available opted-in snapshot should bypass local scanning');
+          JS
+          cat > proof-output/offline-run.py <<'PY'
+          import errno
+          import os
+          from pathlib import Path
+          import socket
+          import subprocess
+          import sys
+          probe=socket.socket()
+          try:
+              probe.connect(('192.0.2.1',443))
+          except OSError as error:
+              assert error.errno==errno.ENETUNREACH,str(error)
+              print('PASS: OS network namespace has loopback and no external route',flush=True)
+          else:
+              raise AssertionError('External route unexpectedly available')
+          finally:
+              probe.close()
+          app,base,out=map(Path,sys.argv[1:])
+          negative=subprocess.run(['node',str(out/'baseline-check.mjs'),str(base/'src/background.js')],text=True,capture_output=True)
+          (out/'original-negative-control.log').write_text(negative.stdout+negative.stderr)
+          assert negative.returncode==1
+          assert 'available opted-in snapshot should bypass local scanning' in negative.stderr
+          assert 'local scans=1, index lookups=0' in negative.stdout
+          print('PASS: exactly one original consumer-contract failure reproduced; original worker module also absent',flush=True)
+          os.environ['GLASS_TEST_TMP']=str(out/'tmp')
+          tests=sorted(str(p) for p in (app/'test').glob('*.test.mjs'))
+          subprocess.run(['node','--test','--test-reporter=tap',*tests],cwd=app,check=True)
+          PY
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/proof-output/offline-run.py" "$GITHUB_WORKSPACE/app" "$GITHUB_WORKSPACE/baseline" "$GITHUB_WORKSPACE/proof-output" | tee proof-output/full-suite.log
+      - name: Chrome package, syntax and exact-source hygiene
+        shell: bash
+        run: |
+          git -C app diff --name-only 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD | while read -r file; do case "$file" in *.js|*.mjs) node --check "app/$file";; esac; done
+          node app/cli/pack.mjs | tee proof-output/package.log
+          mv app/dist proof-output/extension-package
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,zipfile
+          root=Path('app')
+          with zipfile.ZipFile('proof-output/extension-package/glass-extension-0.3.2.zip') as archive:
+              assert archive.testzip() is None
+              actual={n for n in archive.namelist() if not n.endswith('/')}
+              expected={'manifest.json','LICENSE','README.md','PRIVACY.md'}
+              for directory in ['icons','src']:
+                  expected.update(str(p.relative_to(root)) for p in (root/directory).rglob('*') if p.is_file() and '.test.' not in p.name)
+              assert actual==expected,(actual-expected,expected-actual)
+              assert 'src/lib/shared-index.js' in actual
+              for name in actual:
+                  assert archive.read(name)==(root/name).read_bytes(),name
+              manifest=json.loads(archive.read('manifest.json'))
+              assert manifest['minimum_chrome_version']=='110'
+              assert manifest['background']=={'service_worker':'src/background.js','type':'module'}
+              assert manifest['permissions']==['storage']
+              assert not any(n.startswith(('worker/','test/','.github/')) for n in actual)
+              print(f'PASS: exact Chrome package, {len(actual)} files; worker state/config/tests excluded')
+          PY
+          git -C app diff --check 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD
+          test -z "$(git -C app status --porcelain)"
+          test "$(git -C app rev-parse HEAD^{tree})" = a93990cd6103d7434c98c33a46c72a561861bdaa
+          git -C app diff --stat 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD > proof-output/diff-stat.txt
+          git -C app diff --name-only 9649c7c590239d2a91d8c1bd6e2b2a023c48732a HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
+          printf '%s\n' 'Application f2f895701bec4f8f2b53649cebdb6a335e005cb9 tree a93990cd6103d7434c98c33a46c72a561861bdaa. Captured creation/trade fixture with synthetic surrounding transport exercised real seven-stage runScan, durable index, loopback HTTP consumer and restart. Separate CLI used real RpcClient against loopback. Full unchanged offline suite, original failing consumer contract, package and source guards passed. No live RPC/public deployment, browser-runtime or production-throughput claim.' > proof-output/result.txt
+          cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve immutable proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-worker-r236-proof
+          path: |
+            proof-output/
+            !proof-output/tmp/**
+          retention-days: 30

@@ -16,7 +16,7 @@ jobs:
       - name: Check out exact application
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 33b8d5db632eb520b2a1dbe05cf534f29d97aa3c
+          ref: 1658a278aa84fc1a9338995f95a9c34d0df978c2
           path: app
           fetch-depth: 0
           persist-credentials: false
@@ -29,8 +29,8 @@ jobs:
       - name: Verify pins and preinstalled runtimes
         shell: bash
         run: |
-          test "$(git -C app rev-parse HEAD)" = 33b8d5db632eb520b2a1dbe05cf534f29d97aa3c
-          test "$(git -C app rev-parse HEAD^{tree})" = 440fa538512d32bac542c99814d924d981a78a8d
+          test "$(git -C app rev-parse HEAD)" = 1658a278aa84fc1a9338995f95a9c34d0df978c2
+          test "$(git -C app rev-parse HEAD^{tree})" = 60dd9a58412313b6e9b8324df455749f83a2576f
           test "$(git -C baseline rev-parse HEAD)" = 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
           test -z "$(git -C app status --porcelain)"
           node --version
@@ -59,10 +59,10 @@ jobs:
         run: |
           find app/src app/test app/cli -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | while IFS= read -r -d '' file; do node --check "$file"; done
           git -C app diff --check
-          test "$(git -C app rev-parse HEAD^{tree})" = 440fa538512d32bac542c99814d924d981a78a8d
+          test "$(git -C app rev-parse HEAD^{tree})" = 60dd9a58412313b6e9b8324df455749f83a2576f
           test -z "$(git -C app status --porcelain)"
           test -z "$(git -C baseline status --porcelain)"
-          printf '%s\n' 'Exact application 33b8d5db632eb520b2a1dbe05cf534f29d97aa3c. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Exact application 1658a278aa84fc1a9338995f95a9c34d0df978c2. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve original logs, runtime details and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

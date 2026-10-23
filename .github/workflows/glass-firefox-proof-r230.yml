@@ -16,7 +16,7 @@ jobs:
       - name: Check out exact application
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 1658a278aa84fc1a9338995f95a9c34d0df978c2
+          ref: 6d77fefe12c737e1ce59b7cc673af0d96ddb8d67
           path: app
           fetch-depth: 0
           persist-credentials: false
@@ -29,8 +29,8 @@ jobs:
       - name: Verify pins and preinstalled runtimes
         shell: bash
         run: |
-          test "$(git -C app rev-parse HEAD)" = 1658a278aa84fc1a9338995f95a9c34d0df978c2
-          test "$(git -C app rev-parse HEAD^{tree})" = 60dd9a58412313b6e9b8324df455749f83a2576f
+          test "$(git -C app rev-parse HEAD)" = 6d77fefe12c737e1ce59b7cc673af0d96ddb8d67
+          test "$(git -C app rev-parse HEAD^{tree})" = dc19cfb44cf650c33c6f04ca489ec4333f9be30e
           test "$(git -C baseline rev-parse HEAD)" = 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
           test -z "$(git -C app status --porcelain)"
           node --version
@@ -46,23 +46,23 @@ jobs:
         shell: bash
         run: |
           git -C app diff --exit-code 97560eb16bdc36f074957c715d7ed223a7856694 HEAD -- . ':!test/browser-smoke.py'
-          printf '%s\n' 'Run 40029496803: full suite 43 PASS, 8 original-source expected failures, both ZIP/source/CRC/reproducibility checks PASS. Only browser-smoke.py harness setup changed; no test assertion or package input changed. Run 40030221510 reached Firefox TLS-ready at 26s then hit the 30s HTTP session-start timeout: POST /session now allows 60s, all extension wait/command/script/load deadlines remain 15/30/20/20s. No automatic retries.' > app/test-results/prior-proof.txt
+          printf '%s\n' 'Run 40029496803: full suite 43 PASS, 8 original-source expected failures, both ZIP/source/CRC/reproducibility checks PASS. Only browser-smoke.py harness setup changed; no test assertion or package input changed. Run 40030221510 reached Firefox TLS-ready at 26s then hit the 30s HTTP session-start timeout: POST /session now allows 60s, all extension wait/command/script/load deadlines remain 15/30/20/20s. No automatic retries. Run 40031009027 additionally passed all 22 Firefox and isolation checks; artifact12535106061 digest114c55305a8e043ddaa2db2d4abc6fd89b32c5e31554cc7e171cb8554c6584f0. This continuation runs Chromium only after correcting its rejected driver port syntax.' > app/test-results/prior-proof.txt
           cd app
           node cli/pack.mjs all
-      - name: Real Firefox and Chromium in isolated network namespace
+      - name: Remaining Chromium checks in isolated network namespace
         shell: bash
         run: |
           printf '127.0.0.1 pump.fun\n' | sudo tee -a /etc/hosts >/dev/null
-          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/app/test/browser-smoke.py" | tee app/test-results/runtime.log
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/app/test/browser-smoke.py" chromium | tee app/test-results/runtime.log
       - name: Syntax and exact source guards
         shell: bash
         run: |
           find app/src app/test app/cli -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | while IFS= read -r -d '' file; do node --check "$file"; done
           git -C app diff --check
-          test "$(git -C app rev-parse HEAD^{tree})" = 60dd9a58412313b6e9b8324df455749f83a2576f
+          test "$(git -C app rev-parse HEAD^{tree})" = dc19cfb44cf650c33c6f04ca489ec4333f9be30e
           test -z "$(git -C app status --porcelain)"
           test -z "$(git -C baseline status --porcelain)"
-          printf '%s\n' 'Exact application 1658a278aa84fc1a9338995f95a9c34d0df978c2. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Exact application 6d77fefe12c737e1ce59b7cc673af0d96ddb8d67. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve original logs, runtime details and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

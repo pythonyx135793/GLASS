@@ -1,0 +1,88 @@
+name: GLASS Firefox exact-source validation
+on:
+  push:
+    branches: [codex/glass-firefox-proof-r230]
+    paths: [.github/workflows/glass-firefox-proof-r230.yml]
+permissions:
+  contents: read
+concurrency:
+  group: glass-firefox-r230
+  cancel-in-progress: false
+jobs:
+  browser-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 97560eb16bdc36f074957c715d7ed223a7856694
+          path: app
+          persist-credentials: false
+      - name: Check out original source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          path: baseline
+          persist-credentials: false
+      - name: Verify pins and preinstalled runtimes
+        shell: bash
+        run: |
+          test "$(git -C app rev-parse HEAD)" = 97560eb16bdc36f074957c715d7ed223a7856694
+          test "$(git -C app rev-parse HEAD^{tree})" = e0855787468996adf78cbe2d147b5218512fab1f
+          test "$(git -C baseline rev-parse HEAD)" = 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
+          test -z "$(git -C app status --porcelain)"
+          node --version
+          python3 --version
+          firefox --version
+          geckodriver --version
+          chromium --version
+          chromedriver --version
+          mkdir -p app/test-results
+          cat /etc/os-release > app/test-results/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('app/package.json')); if(p.scripts.test!=='node --test test/*.test.mjs'||p.scripts.pretest||p.scripts.posttest||Object.keys(p.dependencies||{}).length||Object.keys(p.devDependencies||{}).length) process.exit(1);"
+      - name: Original-source regression negative control
+        shell: bash
+        run: |
+          set +e
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ env GLASS_SOURCE_ROOT="$GITHUB_WORKSPACE/baseline" node --test --test-reporter=tap app/test/background-lifecycle.test.mjs app/test/webext.test.mjs > app/test-results/original-regressions.log 2>&1
+          result=$?
+          set -e
+          cat app/test-results/original-regressions.log
+          test "$result" -eq 1
+          grep -Fx '# pass 1' app/test-results/original-regressions.log
+          grep -Fx '# fail 8' app/test-results/original-regressions.log
+          test "$(grep -c "code: 'ERR_ASSERTION'" app/test-results/original-regressions.log)" -eq 8
+      - name: Complete fixed-source offline suite
+        working-directory: app
+        shell: bash
+        run: |
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ node --test --test-reporter=tap test/*.test.mjs | tee test-results/full-suite.log
+      - name: Build and independently inspect both reproducible packages
+        working-directory: app
+        run: |
+          node cli/pack.mjs all
+          python3 test/package-check.py | tee test-results/packages.log
+      - name: Real Firefox and Chromium in isolated network namespace
+        shell: bash
+        run: |
+          printf '127.0.0.1 pump.fun\n' | sudo tee -a /etc/hosts >/dev/null
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/app/test/browser-smoke.py" | tee app/test-results/runtime.log
+      - name: Syntax and exact source guards
+        shell: bash
+        run: |
+          find app/src app/test app/cli -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | while IFS= read -r -d '' file; do node --check "$file"; done
+          git -C app diff --check
+          test "$(git -C app rev-parse HEAD^{tree})" = e0855787468996adf78cbe2d147b5218512fab1f
+          test -z "$(git -C app status --porcelain)"
+          test -z "$(git -C baseline status --porcelain)"
+          printf '%s\n' 'Exact application 97560eb16bdc36f074957c715d7ed223a7856694. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve original logs, runtime details and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-firefox-r230-proof
+          path: |
+            app/test-results/
+            app/dist/*.zip
+          retention-days: 30

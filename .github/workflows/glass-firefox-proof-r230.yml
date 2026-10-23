@@ -16,7 +16,7 @@ jobs:
       - name: Check out exact application
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 77d768c89e943cdc7fc68dcbcb4d6cd1d912f0b9
+          ref: 50f217623ace84492eee8253dc8b23be939afe4d
           path: app
           fetch-depth: 0
           persist-credentials: false
@@ -29,8 +29,8 @@ jobs:
       - name: Verify pins and preinstalled runtimes
         shell: bash
         run: |
-          test "$(git -C app rev-parse HEAD)" = 77d768c89e943cdc7fc68dcbcb4d6cd1d912f0b9
-          test "$(git -C app rev-parse HEAD^{tree})" = a5b9bb2a9e1bedac680b56c9a5f2525ad513d589
+          test "$(git -C app rev-parse HEAD)" = 50f217623ace84492eee8253dc8b23be939afe4d
+          test "$(git -C app rev-parse HEAD^{tree})" = df0dde6da82401ca9a5f7ca69fd0a60a01fa5b1c
           test "$(git -C baseline rev-parse HEAD)" = 9649c7c590239d2a91d8c1bd6e2b2a023c48732a
           test -z "$(git -C app status --porcelain)"
           node --version
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           git -C app diff --exit-code 97560eb16bdc36f074957c715d7ed223a7856694 HEAD -- . ':!test/browser-smoke.py'
-          printf '%s\n' 'Run 40029496803: full suite 43 PASS, 8 original-source expected failures, both ZIP/source/CRC/reproducibility checks PASS. Only browser-smoke.py launch configuration changed; no test assertion or package input changed.' > app/test-results/prior-proof.txt
+          printf '%s\n' 'Run 40029496803: full suite 43 PASS, 8 original-source expected failures, both ZIP/source/CRC/reproducibility checks PASS. Only browser-smoke.py driver configuration and permission-dialog selector changed; no test assertion or package input changed.' > app/test-results/prior-proof.txt
           cd app
           node cli/pack.mjs all
       - name: Real Firefox and Chromium in isolated network namespace
@@ -59,10 +59,10 @@ jobs:
         run: |
           find app/src app/test app/cli -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | while IFS= read -r -d '' file; do node --check "$file"; done
           git -C app diff --check
-          test "$(git -C app rev-parse HEAD^{tree})" = a5b9bb2a9e1bedac680b56c9a5f2525ad513d589
+          test "$(git -C app rev-parse HEAD^{tree})" = df0dde6da82401ca9a5f7ca69fd0a60a01fa5b1c
           test -z "$(git -C app status --porcelain)"
           test -z "$(git -C baseline status --porcelain)"
-          printf '%s\n' 'Exact application 77d768c89e943cdc7fc68dcbcb4d6cd1d912f0b9. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Exact application 50f217623ace84492eee8253dc8b23be939afe4d. Offline regressions, source/ZIP guards and actual browser fixture results are in the artifact. No live-chain or signing claim.' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve original logs, runtime details and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

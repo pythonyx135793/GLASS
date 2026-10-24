@@ -1,0 +1,122 @@
+name: GLASS similar launches exact-source offline validation
+on:
+  push:
+    branches: [codex/glass-similar-proof-r239]
+    paths: [.github/workflows/glass-similar-proof-r239.yml]
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 1fbf85338d2b825e4695c37a05b2f5b3696211fa
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pins, unchanged engine/tests and dependency guards
+        shell: bash
+        run: |
+          mkdir -p proof-output
+          test "$(git -C app rev-parse HEAD)" = 1fbf85338d2b825e4695c37a05b2f5b3696211fa
+          test "$(git -C app rev-parse HEAD^{tree})" = 1e5ee3b22ba847a9c344f148df5e53422a6b9681
+          git -C app diff --exit-code 6b7c2fde2f7f321e785f885589f1aa28d256ee54 HEAD -- . ':!PRIVACY.md' ':!README.md' ':!src/background.js' ':!src/content.js' ':!src/lib/scan/similar.js' ':!src/lib/similar-index.js' ':!src/popup.html' ':!test/helpers/similar-fixtures.mjs' ':!test/similar-integration.test.mjs' ':!test/similar.test.mjs' ':!worker/README.md' ':!worker/SIMILAR.md' ':!worker/config.example.json' ':!worker/history.mjs' ':!worker/import-history.mjs' ':!worker/main.mjs' ':!worker/server.mjs' ':!worker/worker.mjs'
+          git -C app worktree add --detach ../baseline 6b7c2fde2f7f321e785f885589f1aa28d256ee54
+          test ! -e baseline/src/lib/scan/similar.js
+          node --version | tee proof-output/node-version.txt
+          python3 --version | tee proof-output/python-version.txt
+          cat /etc/os-release > proof-output/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs';import assert from 'node:assert/strict';import{DEFAULTS}from './app/src/lib/constants.js';const p=JSON.parse(fs.readFileSync('app/package.json'));assert.equal(p.scripts.test,'node --test test/*.test.mjs');assert.ok(!p.scripts.pretest&&!p.scripts.posttest);assert.equal(Object.keys(p.dependencies||{}).length,0);assert.equal(Object.keys(p.devDependencies||{}).length,0);assert.equal(DEFAULTS.sharedIndexEnabled,false);assert.equal(DEFAULTS.sharedIndexUrl,'');"
+      - name: Original failing consumer contract and full fixed suite with external network blocked
+        shell: bash
+        run: |
+          cat > proof-output/baseline-check.mjs <<'JS'
+          import assert from 'node:assert/strict';
+          import { pathToFileURL } from 'node:url';
+          const {indexServer}=await import(pathToFileURL(process.argv[2]));
+          const mint='So11111111111111111111111111111111111111112';
+          const server=indexServer({history:{query:()=>({schema:1,mint})},state:{jobs:{}}},()=>({}));
+          await new Promise((r)=>server.listen(0,'127.0.0.1',r));
+          try {
+            const response=await fetch(`http://127.0.0.1:${server.address().port}/v1/similar/${mint}`);
+            console.log(`Original similar-history HTTP status=${response.status}`);
+            assert.equal(response.status,200,'configured history should be queryable by mint');
+          } finally {server.closeAllConnections();await new Promise((r)=>server.close(r));}
+          JS
+          cat > proof-output/offline-run.py <<'PY'
+          import errno
+          import os
+          from pathlib import Path
+          import socket
+          import subprocess
+          import sys
+          probe=socket.socket()
+          try:
+              probe.connect(('192.0.2.1',443))
+          except OSError as error:
+              assert error.errno==errno.ENETUNREACH,str(error)
+              print('PASS: OS network namespace has loopback and no external route',flush=True)
+          else:
+              raise AssertionError('External route unexpectedly available')
+          finally:
+              probe.close()
+          app,base,out=map(Path,sys.argv[1:])
+          negative=subprocess.run(['node',str(out/'baseline-check.mjs'),str(base/'worker/server.mjs')],text=True,capture_output=True)
+          (out/'original-negative-control.log').write_text(negative.stdout+negative.stderr)
+          assert negative.returncode==1
+          assert 'configured history should be queryable by mint' in negative.stderr
+          assert 'Original similar-history HTTP status=404' in negative.stdout
+          print('PASS: exactly one original HTTP history-query failure reproduced; similarity module also absent',flush=True)
+          os.environ['GLASS_TEST_TMP']=str(out/'tmp')
+          tests=sorted(str(p) for p in (app/'test').glob('*.test.mjs'))
+          subprocess.run(['node','--test','--test-reporter=tap',*tests],cwd=app,check=True)
+          PY
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/proof-output/offline-run.py" "$GITHUB_WORKSPACE/app" "$GITHUB_WORKSPACE/baseline" "$GITHUB_WORKSPACE/proof-output" | tee proof-output/full-suite.log
+      - name: Chrome package, syntax and exact-source hygiene
+        shell: bash
+        run: |
+          git -C app diff --name-only 6b7c2fde2f7f321e785f885589f1aa28d256ee54 HEAD | while read -r file; do case "$file" in *.js|*.mjs) node --check "app/$file";; esac; done
+          node app/cli/pack.mjs | tee proof-output/package.log
+          mv app/dist proof-output/extension-package
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,zipfile
+          root=Path('app')
+          with zipfile.ZipFile('proof-output/extension-package/glass-extension-0.3.2.zip') as archive:
+              assert archive.testzip() is None
+              actual={n for n in archive.namelist() if not n.endswith('/')}
+              expected={'manifest.json','LICENSE','README.md','PRIVACY.md'}
+              for directory in ['icons','src']:
+                  expected.update(str(p.relative_to(root)) for p in (root/directory).rglob('*') if p.is_file() and '.test.' not in p.name)
+              assert actual==expected,(actual-expected,expected-actual)
+              assert 'src/lib/shared-index.js' in actual
+              assert 'src/lib/similar-index.js' in actual
+              assert 'src/lib/scan/similar.js' in actual
+              for name in actual:
+                  assert archive.read(name)==(root/name).read_bytes(),name
+              manifest=json.loads(archive.read('manifest.json'))
+              assert manifest['minimum_chrome_version']=='110'
+              assert manifest['background']=={'service_worker':'src/background.js','type':'module'}
+              assert manifest['permissions']==['storage']
+              assert not any(n.startswith(('worker/','test/','.github/')) for n in actual)
+              print(f'PASS: exact Chrome package, {len(actual)} files; worker state/config/tests excluded')
+          PY
+          git -C app diff --check 6b7c2fde2f7f321e785f885589f1aa28d256ee54 HEAD
+          test -z "$(git -C app status --porcelain)"
+          test "$(git -C app rev-parse HEAD^{tree})" = 1e5ee3b22ba847a9c344f148df5e53422a6b9681
+          git -C app diff --stat 6b7c2fde2f7f321e785f885589f1aa28d256ee54 HEAD > proof-output/diff-stat.txt
+          git -C app diff --name-only 6b7c2fde2f7f321e785f885589f1aa28d256ee54 HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
+          printf '%s\n' 'Application 1fbf85338d2b825e4695c37a05b2f5b3696211fa tree 1e5ee3b22ba847a9c344f148df5e53422a6b9681; depends on worker 6b7c2fde2f7f321e785f885589f1aa28d256ee54. 15 new similarity contract/integration cases plus 52 unchanged tests. Rotated-wallet synthetic controls, unchanged captured transactions through the actual engine, durable worker history, offline import/update CLI, real loopback HTTP, actual background/panel functions. OS network isolation, one original missing-query failure, exact package and source guards. No browser-runtime, deployed service, real historical corpus, calibrated accuracy or production throughput claim.' > proof-output/result.txt
+          cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve immutable proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-similar-r239-proof
+          path: |
+            proof-output/
+            !proof-output/tmp/**
+          retention-days: 30

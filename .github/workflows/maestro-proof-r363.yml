@@ -13,7 +13,7 @@ jobs:
       - name: Check out exact application
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 3f4aebf3a967598f6c14069be82a8c1924b02fe6
+          ref: c5871491f861f0bfbd8f165ae2596a014e5e2c44
           path: app
           fetch-depth: 0
           persist-credentials: false
@@ -21,8 +21,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p proof-output
-          test "$(git -C app rev-parse HEAD)" = 3f4aebf3a967598f6c14069be82a8c1924b02fe6
-          test "$(git -C app rev-parse HEAD^{tree})" = d803586922f0f3a2db72cf5628ffed9b1932fba2
+          test "$(git -C app rev-parse HEAD)" = c5871491f861f0bfbd8f165ae2596a014e5e2c44
+          test "$(git -C app rev-parse HEAD^{tree})" = a0ed08348a07e98ce892725fdd7556472aab7aa1
           git -C app diff --exit-code e7aba5a HEAD -- . ':!.gitattributes' ':!README.md' ':!cli/scan.mjs' ':!docs/bot-labels.md' ':!src/background.js' ':!src/content.js' ':!src/data/known.js' ':!src/lib/constants.js' ':!src/lib/routes.js' ':!src/lib/scan/feewallets.js' ':!src/lib/scan/fingerprint.js' ':!src/lib/scan/launch.js' ':!src/lib/txparse.js' ':!test/bot-labels.test.mjs' ':!test/fixtures/maestro-fee-mainnet.json'
           git -C app worktree add --detach ../baseline e7aba5a50a25d1a4f0d7d890155cced7ea67a532
           node --version | tee proof-output/node-version.txt
@@ -95,10 +95,10 @@ jobs:
           PY
           git -C app diff --check e7aba5a HEAD
           test -z "$(git -C app status --porcelain)"
-          test "$(git -C app rev-parse HEAD^{tree})" = d803586922f0f3a2db72cf5628ffed9b1932fba2
+          test "$(git -C app rev-parse HEAD^{tree})" = a0ed08348a07e98ce892725fdd7556472aab7aa1
           git -C app diff --stat e7aba5a HEAD > proof-output/diff-stat.txt
           git -C app diff --name-only e7aba5a HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
-          printf '%s\n' 'Application 3f4aebf3a967598f6c14069be82a8c1924b02fe6 tree d803586922f0f3a2db72cf5628ffed9b1932fba2. 52 passing tests: 18 fee/registry cases plus 34 unchanged tests. Original control: 13 assertions fail, 5 controls pass. Real captured mainnet receipt replay plus synthetic edge cases and actual panel renderer in Node. OS network isolation, exact package/source guards. No browser runtime, live scan, complete bot coverage, program ownership or operator identity claim.' > proof-output/result.txt
+          printf '%s\n' 'Application c5871491f861f0bfbd8f165ae2596a014e5e2c44 tree a0ed08348a07e98ce892725fdd7556472aab7aa1. 52 passing tests: 18 fee/registry cases plus 34 unchanged tests. Original control: 13 assertions fail, 5 controls pass. Real captured mainnet receipt replay plus synthetic edge cases and actual panel renderer in Node. OS network isolation, exact package/source guards. No browser runtime, live scan, complete bot coverage, program ownership or operator identity claim.' > proof-output/result.txt
           cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve proof
         if: always()

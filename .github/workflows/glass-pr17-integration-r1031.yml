@@ -1,0 +1,35 @@
+name: GLASS PR17 current-main integration proof
+
+on:
+  push:
+    branches: [codex/glass-pr17-integration-proof-r1031]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Prepare pinned source and verify merge provenance
+        run: python3 proof/pr17-integration-r1031.py prepare
+      - name: Complete offline integration proof
+        run: sudo -n unshare --net -- python3 proof/pr17-integration-r1031.py verify
+      - name: Upload exact-source proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-pr17-integration-r1031
+          path: |
+            proof/out/*.json
+            proof/out/*.log
+            proof/out/*.patch
+            proof/out/*.zip
+          if-no-files-found: error
+          retention-days: 30

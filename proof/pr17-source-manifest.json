@@ -1,0 +1,110 @@
+[
+  {
+    "path": ".gitattributes",
+    "git_blob": "2d6d58b69456095c920bb66e75aacc27379196e1",
+    "sha256": "98059bc959b995cf5d9ba2c1ba58bd1ac53dea4c1fe07c44f0fde1fd961990bd",
+    "bytes": 296
+  },
+  {
+    "path": "README.md",
+    "git_blob": "68edcf5b8824ce9b936b2d61911a21747827d1aa",
+    "sha256": "8010019699e4c85a206118e6c852312589aff95b31de82aebbe344b2905bd83b",
+    "bytes": 15018
+  },
+  {
+    "path": "cli/scan.mjs",
+    "git_blob": "576c5b17d0669fbea594636d4120dfee51034c36",
+    "sha256": "92763bf6ad2f4b0322c13b8783e6e03b291b0e6f6a426852d3c0d7560c1caf1e",
+    "bytes": 7494
+  },
+  {
+    "path": "docs/bot-labels.md",
+    "git_blob": "aeb6ae03d12cf13eebea37da024c6833b8843f94",
+    "sha256": "d27381b33831dc55ad21614690e1f350262b046b64fb232ab6690d913fd9ece4",
+    "bytes": 6879
+  },
+  {
+    "path": "src/background.js",
+    "git_blob": "06cbb836be1aeb7686c25d85414519faf1b29cbe",
+    "sha256": "4724eac9f4feba858aa8c85091d0032b020d8f1a6cc9d8eb19d918944b0b5439",
+    "bytes": 9696
+  },
+  {
+    "path": "src/content.js",
+    "git_blob": "19e9332b6932d4d06df066d64e95e0360a297150",
+    "sha256": "311dd27a5469c976a46e16b064eb94e2bf754953bc846f21a6ba083fbe5fa51f",
+    "bytes": 74994
+  },
+  {
+    "path": "src/data/known.js",
+    "git_blob": "be5005c7bc16fd21c7556b1d137963d2a70f8181",
+    "sha256": "85dfd03e4b4c9d9071901dd5516b03aac6e5e5b93ab3f17ef38f2c86481233b0",
+    "bytes": 2254
+  },
+  {
+    "path": "src/lib/constants.js",
+    "git_blob": "50f05d241c54ad4fcf3882945623629c3b1b8972",
+    "sha256": "855f05371b35baf9e048976fefb80ae65065de40451905dff01e09f3cb152f7a",
+    "bytes": 5277
+  },
+  {
+    "path": "src/lib/routes.js",
+    "git_blob": "d12ac5e29fa46cf7cae52061d22c827a60f1c686",
+    "sha256": "9fed9eabbeb1c784813880b23b70c53020e2489fbe3a55c3190a841403700f79",
+    "bytes": 6605
+  },
+  {
+    "path": "src/lib/scan/feewallets.js",
+    "git_blob": "1f904c439a01c4d762e9fd967ef4556fc7670d0d",
+    "sha256": "307b9f8fc2ec1c67617ef7d369fb6b39dd2a90df7bdcffd5c58b1d4e61401d51",
+    "bytes": 4199
+  },
+  {
+    "path": "src/lib/scan/fingerprint.js",
+    "git_blob": "22fded261240315fad58ce58f7a5ea7d18008da0",
+    "sha256": "3ffe62298a5b3bf6c793599f9ce7ecffc4a71b5e8e9bcac59a72799805ca86d3",
+    "bytes": 15750
+  },
+  {
+    "path": "src/lib/scan/launch.js",
+    "git_blob": "7b2229553c74b2a93863eb4323d723bde0b1b856",
+    "sha256": "f28c12b9a510d142d3327cb586197fa951c98b2b644b2bc17d7fb0b69390c44f",
+    "bytes": 14202
+  },
+  {
+    "path": "src/lib/txparse.js",
+    "git_blob": "7da9e81c206416ce863fb8e12085c69944a727e1",
+    "sha256": "57e2d17edcda4e8629d1a14ce65bb89d1e5728c315b952297120ec2b1bfb25b6",
+    "bytes": 15095
+  },
+  {
+    "path": "test/bot-labels.test.mjs",
+    "git_blob": "ab60307f1368676ec055c93f6af0f38424600efb",
+    "sha256": "ff1fa4e61a9daf22f5096e73bf565973b501356396bd2f79066fdb5ccff1c8c7",
+    "bytes": 17920
+  },
+  {
+    "path": "test/fee-wallet-labels.test.mjs",
+    "git_blob": "089899abeef283783434995575ce39c1c3777109",
+    "sha256": "8d26d9518158b0aae72aab342104ac05d94ce705dbb3757a3634303aaedce9c9",
+    "bytes": 3688
+  },
+  {
+    "path": "test/fixtures/maestro-fee-mainnet.json",
+    "git_blob": "757478ce7c951b80f2477f0b32dfe0a2b5971473",
+    "sha256": "c47b5496f0bf325cc61322a603f4b348de4cd1c8ededecfda331b287e246991e",
+    "bytes": 58699
+  },
+  {
+    "path": "test/fixtures/okx-router-mainnet.json",
+    "git_blob": "9b22f2a274e96c1bcb8ca760ea392c8ee06477d8",
+    "sha256": "8bf9aa5688dbf2bb396fb80290e657a05249127ff12e5b68c3826fac80ccbf5b",
+    "bytes": 35834
+  },
+  {
+    "path": "test/okx-router.test.mjs",
+    "git_blob": "787268257516daf2f3632ea51652dd581c0604a1",
+    "sha256": "d666b5bf7ef817ab8142b989fac5c806190291048b121941e71f413b5ce3ac9e",
+    "bytes": 8980
+  }
+]

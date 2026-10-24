@@ -1,0 +1,109 @@
+name: GLASS Maestro exact-source offline validation
+on:
+  push:
+    branches: [codex/maestro-bot-labels-proof-r363]
+    paths: [.github/workflows/maestro-proof-r363.yml]
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact application
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3f4aebf3a967598f6c14069be82a8c1924b02fe6
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pins, unchanged tests and dependency guards
+        shell: bash
+        run: |
+          mkdir -p proof-output
+          test "$(git -C app rev-parse HEAD)" = 3f4aebf3a967598f6c14069be82a8c1924b02fe6
+          test "$(git -C app rev-parse HEAD^{tree})" = d803586922f0f3a2db72cf5628ffed9b1932fba2
+          git -C app diff --exit-code e7aba5a HEAD -- . ':!.gitattributes' ':!README.md' ':!cli/scan.mjs' ':!docs/bot-labels.md' ':!src/background.js' ':!src/content.js' ':!src/data/known.js' ':!src/lib/constants.js' ':!src/lib/routes.js' ':!src/lib/scan/feewallets.js' ':!src/lib/scan/fingerprint.js' ':!src/lib/scan/launch.js' ':!src/lib/txparse.js' ':!test/bot-labels.test.mjs' ':!test/fixtures/maestro-fee-mainnet.json'
+          git -C app worktree add --detach ../baseline e7aba5a50a25d1a4f0d7d890155cced7ea67a532
+          node --version | tee proof-output/node-version.txt
+          python3 --version | tee proof-output/python-version.txt
+          cat /etc/os-release > proof-output/os-release.txt
+          node --input-type=module -e "import fs from 'node:fs';import assert from 'node:assert/strict';const p=JSON.parse(fs.readFileSync('app/package.json'));assert.equal(p.scripts.test,'node --test test/*.test.mjs');assert.ok(!p.scripts.pretest&&!p.scripts.posttest);assert.equal(Object.keys(p.dependencies||{}).length,0);assert.equal(Object.keys(p.devDependencies||{}).length,0);"
+      - name: Original negative control and full fixed suite with external network blocked
+        shell: bash
+        run: |
+          cat > proof-output/offline-run.py <<'PY'
+          import errno, shutil, socket, subprocess, sys
+          from pathlib import Path
+          probe=socket.socket()
+          try:
+              probe.connect(('192.0.2.1',443))
+          except OSError as error:
+              assert error.errno==errno.ENETUNREACH,str(error)
+              print('PASS: OS network namespace has loopback and no external route',flush=True)
+          else:
+              raise AssertionError('External route unexpectedly available')
+          finally:
+              probe.close()
+          app,base,out=map(Path,sys.argv[1:])
+          for name in ['test/bot-labels.test.mjs','test/fixtures/maestro-fee-mainnet.json']:
+              shutil.copyfile(app/name,base/name)
+          negative=subprocess.run(['node','--test','--test-reporter=tap','test/bot-labels.test.mjs'],cwd=base,text=True,capture_output=True)
+          log=negative.stdout+negative.stderr
+          (out/'original-negative-control.log').write_text(log)
+          assert negative.returncode==1
+          assert '# pass 5' in log and '# fail 13' in log and '# tests 18' in log,log
+          assert log.count("code: 'ERR_ASSERTION'")==13,log
+          assert 'ERR_MODULE_NOT_FOUND' not in log
+          print('PASS: original source has 13 assertion failures and 5 passing controls; no import failure',flush=True)
+          tests=sorted(str(p) for p in (app/'test').glob('*.test.mjs'))
+          result=subprocess.run(['node','--test','--test-reporter=tap',*tests],cwd=app,text=True,capture_output=True)
+          log=result.stdout+result.stderr
+          (out/'full-suite.log').write_text(log)
+          print(log,flush=True)
+          assert result.returncode==0
+          assert '# tests 52' in log and '# pass 52' in log and '# fail 0' in log and '# skipped 0' in log
+          PY
+          sudo unshare --net bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ python3 "$GITHUB_WORKSPACE/proof-output/offline-run.py" "$GITHUB_WORKSPACE/app" "$GITHUB_WORKSPACE/baseline" "$GITHUB_WORKSPACE/proof-output" | tee proof-output/validation.log
+      - name: Package, syntax and exact-source hygiene
+        shell: bash
+        run: |
+          find app/src app/cli app/test -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | while IFS= read -r -d '' file; do node --check "$file"; done
+          node app/cli/pack.mjs | tee proof-output/package.log
+          mv app/dist proof-output/extension-package
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,zipfile
+          root=Path('app')
+          fixture=(root/'test/fixtures/maestro-fee-mainnet.json').read_bytes()
+          assert hashlib.sha256(fixture).hexdigest()=='c47b5496f0bf325cc61322a603f4b348de4cd1c8ededecfda331b287e246991e'
+          with zipfile.ZipFile('proof-output/extension-package/glass-extension-0.3.2.zip') as archive:
+              assert archive.testzip() is None
+              actual={n for n in archive.namelist() if not n.endswith('/')}
+              expected={'manifest.json','LICENSE','README.md','PRIVACY.md'}
+              for directory in ['icons','src']:
+                  expected.update(str(p.relative_to(root)) for p in (root/directory).rglob('*') if p.is_file() and '.test.' not in p.name)
+              assert actual==expected,(actual-expected,expected-actual)
+              assert 'src/lib/routes.js' in actual
+              for name in actual:
+                  assert archive.read(name)==(root/name).read_bytes(),name
+              manifest=json.loads(archive.read('manifest.json'))
+              assert manifest['minimum_chrome_version']=='110'
+              assert manifest['permissions']==['storage']
+              assert not any(n.startswith(('test/','.github/')) for n in actual)
+              print(f'PASS: exact Chrome package, {len(actual)} files; tests and captured research excluded')
+          PY
+          git -C app diff --check e7aba5a HEAD
+          test -z "$(git -C app status --porcelain)"
+          test "$(git -C app rev-parse HEAD^{tree})" = d803586922f0f3a2db72cf5628ffed9b1932fba2
+          git -C app diff --stat e7aba5a HEAD > proof-output/diff-stat.txt
+          git -C app diff --name-only e7aba5a HEAD | while read -r file; do sha256sum "app/$file"; done > proof-output/source-sha256.txt
+          printf '%s\n' 'Application 3f4aebf3a967598f6c14069be82a8c1924b02fe6 tree d803586922f0f3a2db72cf5628ffed9b1932fba2. 52 passing tests: 18 fee/registry cases plus 34 unchanged tests. Original control: 13 assertions fail, 5 controls pass. Real captured mainnet receipt replay plus synthetic edge cases and actual panel renderer in Node. OS network isolation, exact package/source guards. No browser runtime, live scan, complete bot coverage, program ownership or operator identity claim.' > proof-output/result.txt
+          cat proof-output/result.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: glass-maestro-r363-proof
+          path: proof-output/
+          retention-days: 30

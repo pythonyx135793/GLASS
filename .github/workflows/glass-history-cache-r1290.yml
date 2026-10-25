@@ -34,13 +34,21 @@ jobs:
       - name: Validate inside a network namespace without routes
         shell: bash
         run: |
-          command -v node python3 zip ip unshare
+          command -v node python3 zip ip unshare setpriv
           node --version
           python3 --version
           git --version
           test "$(git -C proof rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git -C proof status --porcelain)"
-          env -u NODE_OPTIONS -u NODE_PATH sudo unshare --net -- bash -euo pipefail -c '
+          runner_uid=$(id -u)
+          runner_gid=$(id -g)
+          test "$runner_uid" -ne 0
+          sudo --preserve-env=HOME,PATH unshare --net -- \
+            setpriv --reuid "$runner_uid" --regid "$runner_gid" --init-groups -- \
+            env -u NODE_OPTIONS -u NODE_PATH bash -euo pipefail -c '
+            test "$(id -u)" = "$1"
+            test "$(id -g)" = "$2"
+            id
             python3 proof/.proof/history-cache/assert-no-network.py
             python3 proof/.proof/history-cache/validate.py app baseline
-          '
+          ' history-cache-proof "$runner_uid" "$runner_gid"

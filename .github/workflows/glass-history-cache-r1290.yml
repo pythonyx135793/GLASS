@@ -1,0 +1,46 @@
+name: GLASS history cache exact-source proof
+on:
+  push:
+    branches: [codex/proof-usdc-history-cache-r1290]
+permissions:
+  contents: read
+concurrency:
+  group: glass-history-cache-r1290
+  cancel-in-progress: false
+jobs:
+  offline-validation:
+    if: github.repository == 'pythonyx135793/GLASS' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out proof scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: proof
+          persist-credentials: false
+      - name: Check out exact fixed application
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 113b44300b4b951efe5c60c912731ee2f28727e2
+          path: app
+          persist-credentials: false
+      - name: Check out submitted source for the new regression control
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: c5de94674aa94239140d500f07f59243d86bbf00
+          path: baseline
+          persist-credentials: false
+      - name: Validate inside a network namespace without routes
+        shell: bash
+        run: |
+          command -v node python3 zip ip unshare
+          node --version
+          python3 --version
+          git --version
+          test "$(git -C proof rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C proof status --porcelain)"
+          env -u NODE_OPTIONS -u NODE_PATH sudo unshare --net -- bash -euo pipefail -c '
+            python3 proof/.proof/history-cache/assert-no-network.py
+            python3 proof/.proof/history-cache/validate.py app baseline
+          '
